@@ -1,0 +1,23 @@
+name: race-autostart
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+concurrency:
+  group: race-autostart
+  cancel-in-progress: false
+jobs:
+  keeper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install ethers@6 --no-audit --no-fund
+      - run: node scripts/race_autostart.mjs
+        env:
+          KEEPER_PK: ${{ secrets.KEEPER_PK }}
+          RPC_URL: https://bsc-dataseed.bnbchain.org
+          RUN_MIN: '340'
