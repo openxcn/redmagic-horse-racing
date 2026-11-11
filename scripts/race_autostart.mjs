@@ -1,4 +1,4 @@
-// 满员自动开赛（云端版）：GitHub Actions 里常驻轮询，报满 12 匹立即 timeStart
+// 满员自动开赛（云端版）：GitHub Actions 里常驻轮询，报满 12 匹且下注窗口结束后立即 timeStart
 // 环境变量：KEEPER_PK（必填，仅含 BNB 的 keeper 钱包私钥）、RPC_URL（可选）
 import { ethers } from 'ethers';
 
@@ -12,11 +12,13 @@ const SCAN = 10;
 const ABI = [
   'function raceCount() view returns(uint256)',
   'function maxHorses() view returns(uint256)',
+  'function autoStartGrace() view returns(uint256)',
   'function minGuarantee() view returns(uint256)',
   'function minGuaranteeUsdt() view returns(uint256)',
   'function races(uint256) view returns(uint256 id,address organizer,uint8 currency,uint256 entryFee,uint8 state,uint256 startAt,uint256 endAt,uint256 pool,uint256 sponsor,uint8 raceType,uint64 startBlock)',
   'function horsesOf(uint256) view returns(uint256[])',
   'function fullAt(uint256) view returns(uint256)',
+  'function betCloseAt(uint256) view returns(uint256)',
   'function rewardFunds(uint256) view returns(uint256)',
   'function timeStart(uint256)',
 ];
@@ -31,24 +33,30 @@ const log = m => console.log(new Date().toISOString() + ' ' + m);
 const done = new Set();
 
 async function tick() {
-  const [count, maxH, mg, mgU] = await Promise.all([c.raceCount(), c.maxHorses(), c.minGuarantee(), c.minGuaranteeUsdt()]);
+  const [count, maxH, grace, mg, mgU] = await Promise.all([
+    c.raceCount(), c.maxHorses(), c.autoStartGrace(), c.minGuarantee(), c.minGuaranteeUsdt(),
+  ]);
   const n = Number(count);
   const ids = [];
   for (let id = Math.max(1, n - SCAN + 1); id <= n; id++) ids.push(id);
   const rs = await Promise.all(ids.map(id => c.races(id)));
   const open = ids.filter((id, i) => Number(rs[i].state) === 0 && !done.has(id));
   if (!open.length) return;
+
   const lens = await Promise.all(open.map(id => c.horsesOf(id)));
-  for (let i = 0; i < open.length; i++) {
-    const id = open[i];
-    if (lens[i].length < Number(maxH)) continue;
-    const [fullAt, fund, r] = await Promise.all([c.fullAt(id), c.rewardFunds(id), c.races(id)]);
+  const full = open.filter((id, i) => lens[i].length >= Number(maxH));
+  if (!full.length) return;
+
+  const now = BigInt((await p.getBlock('latest')).timestamp);
+  for (const id of full) {
+    const [fullAt, closeAt, fund, r] = await Promise.all([c.fullAt(id), c.betCloseAt(id), c.rewardFunds(id), c.races(id)]);
     if (fullAt === 0n) continue;
+    if (now < closeAt + grace) continue; // 下注窗口还没结束，继续等
     if (fund < (Number(r.currency) === 1 ? mgU : mg)) { log('场 #' + id + ' 满员但保证金不足，跳过'); done.add(id); continue; }
     for (let a = 1; a <= 3; a++) {
       try {
         const tx = await w.sendTransaction({ to: RACE, data: c.interface.encodeFunctionData('timeStart', [id]), gasLimit: 4000000, gasPrice: ethers.parseUnits('0.06', 'gwei'), chainId: 56 });
-        log('场 #' + id + ' 满员，已开赛 tx ' + tx.hash);
+        log('场 #' + id + ' 下注窗口结束，已开赛 tx ' + tx.hash);
         done.add(id);
         break;
       } catch (e) { log('场 #' + id + ' 开赛失败(' + a + ')：' + String(e.shortMessage || e.message).slice(0, 120)); await sleep(3000); }
