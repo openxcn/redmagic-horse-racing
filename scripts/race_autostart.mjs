@@ -8,11 +8,11 @@ const RACE = '0x8F5a241BaD21e63d4a4553BA675CdE76363b5149';
 const BET = '0x50358dF97F8129E4C3583149d634312c427A75ED';
 const RPC = process.env.RPC_URL || 'https://bsc-dataseed.bnbchain.org';
 const PK = process.env.KEEPER_PK;
-const POLL = 15000;
+const POLL = 60000;       // 开赛巡查间隔：满员后最多晚 1 分钟开跑；结算不走这个频率
 const RUN_MIN = Number(process.env.RUN_MIN || 340);
 const SCAN = 10;          // 自动开赛扫描最近多少场
 const SETTLE_SCAN = 30;   // 自动结算扫描最近多少场
-const SETTLE_GRACE = 60;  // 到点后缓冲秒数，避免链上时间比本机晚导致 tooEarly
+const SETTLE_AFTER = 86400; // 结束满 24 小时仍未结算才自动接管，给社长留足手动结算时间
 
 const ABI = [
   'function raceCount() view returns(uint256)',
@@ -78,8 +78,9 @@ async function autoStart() {
   }
 }
 
-/* 到点自动结算：state 1 且已过 endAt + 缓冲 → finishRace（任何人可调）
-   结算完再交割下注池：state 2 且未 settled → Betting.settle（产生冠军、开启领奖窗口） */
+/* 到点自动结算：state 1 且已过 endAt + 24 小时 → finishRace（任何人可调）
+   结算完再交割下注池：state 2 且未 settled → Betting.settle（产生冠军、开启领奖窗口）
+   注意：本函数每轮任务只在启动时巡查一次，不参与 15 秒轮询，避免频繁扫链 */
 async function autoSettle() {
   const count = Number(await c.raceCount());
   const ids = [];
@@ -94,7 +95,7 @@ async function autoSettle() {
     const st = Number(r.state);
 
     if (st === 1 && !done.has('f' + id)) {
-      if (r.endAt === 0n || now < r.endAt + BigInt(SETTLE_GRACE)) continue;
+      if (r.endAt === 0n || now < r.endAt + BigInt(SETTLE_AFTER)) continue;
       for (let a = 1; a <= 3; a++) {
         try {
           const tx = await w.sendTransaction({ to: RACE, data: c.interface.encodeFunctionData('finishRace', [id]), gasLimit: 1800000, gasPrice: GAS, chainId: 56 });
@@ -123,12 +124,14 @@ async function autoSettle() {
   }
 }
 
+let settleChecked = false;
 async function tick() {
   await autoStart();
-  await autoSettle();
+  // 结算巡查每轮任务只做一次：结束满 24 小时的场次才动手，不需要 15 秒扫
+  if (!settleChecked) { settleChecked = true; await autoSettle(); }
 }
 
-log('keeper 启动（自动开赛 + 自动结算），地址 ' + w.address + '，轮询 ' + POLL / 1000 + ' 秒，运行 ' + RUN_MIN + ' 分钟');
+log('keeper 启动（自动开赛 15 秒轮询 + 结算每轮巡查一次/结束满 24 小时接管），地址 ' + w.address + '，运行 ' + RUN_MIN + ' 分钟');
 const end = Date.now() + RUN_MIN * 60000;
 while (Date.now() < end) {
   try { await tick(); } catch (e) { log('轮询异常：' + String(e.shortMessage || e.message).slice(0, 120)); }
