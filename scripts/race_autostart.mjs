@@ -32,11 +32,20 @@ const BET_ABI = [
   'function settle(uint256)',
 ];
 
+// 结算矿工费托管合约：社长建场时预存，结算完成后由 keeper 催付领回
+const ESCROW = '0xEDFDa39689c48EFaDA39B832f76eb3319c8082de';
+const ESCROW_ABI = [
+  'function claim(uint256)',
+  'function claimable(uint256) view returns(bool)',
+  'function balanceOfRace(uint256) view returns(uint256)',
+];
+
 if (!PK) { console.error('缺少 KEEPER_PK'); process.exit(1); }
 
 const p = new ethers.JsonRpcProvider(RPC, 56, { staticNetwork: true, batchMaxCount: 10, timeout: 20000 });
 const c = new ethers.Contract(RACE, ABI, p);
 const bet = new ethers.Contract(BET, BET_ABI, p);
+const escrow = new ethers.Contract(ESCROW, ESCROW_ABI, p);
 const w = new ethers.Wallet(PK, p);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const log = m => console.log(new Date().toISOString() + ' ' + m);
@@ -123,9 +132,32 @@ async function autoSettle() {
   }
 }
 
+/* 托管费催付：社长建场时把 0.0005 BNB 存进了托管合约，
+   本场结算完成（且下注池已交割，或结束满 1 天）后领回给 keeper，把垫付的矿工费收回来。
+   合约只把钱打给 keeper，所以谁催都安全，写在这里只是让它自动发生。 */
+async function sweepEscrow() {
+  const count = Number(await c.raceCount());
+  const ids = [];
+  for (let id = Math.max(1, count - 30 + 1); id <= count; id++) ids.push(id);
+  const bals = await Promise.all(ids.map(id => escrow.balanceOfRace(id).catch(() => 0n)));
+  const hold = ids.filter((id, i) => bals[i] > 0n && !done.has('e' + id));
+  for (const id of hold) {
+    try {
+      if (!(await escrow.claimable(id))) continue;
+      const tx = await w.sendTransaction({ to: ESCROW, data: escrow.interface.encodeFunctionData('claim', [id]), gasLimit: 200000, gasPrice: GAS, chainId: 56 });
+      log('场 #' + id + ' 已从托管合约领回结算矿工费 tx ' + tx.hash);
+      done.add('e' + id);
+    } catch (e) {
+      log('场 #' + id + ' 托管催付失败：' + String(e.shortMessage || e.message).slice(0, 120));
+      done.add('e' + id);
+    }
+  }
+}
+
 async function tick() {
   await autoStart();
   await autoSettle();
+  await sweepEscrow();
 }
 
 log('keeper 启动（满员自动开赛 + 开赛满 10 分钟自动结算，60 秒巡查一次），地址 ' + w.address + '，运行 ' + RUN_MIN + ' 分钟');
