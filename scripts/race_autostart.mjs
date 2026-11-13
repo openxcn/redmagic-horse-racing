@@ -41,7 +41,7 @@ const w = new ethers.Wallet(PK, p);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const log = m => console.log(new Date().toISOString() + ' ' + m);
 const done = new Set();
-const GAS = ethers.parseUnits('0.06', 'gwei');
+const GAS = ethers.parseUnits('0.1', 'gwei'); // BSC 可打包的最低档，0.06 容易被节点判低价拒收
 
 /* 满员自动开赛：报满 12 匹且下注窗口结束后立即 timeStart */
 async function autoStart() {
