@@ -97,7 +97,7 @@ async function autoSettle() {
       if (r.endAt === 0n || now < r.endAt + BigInt(SETTLE_GRACE)) continue;
       for (let a = 1; a <= 3; a++) {
         try {
-          const tx = await w.sendTransaction({ to: RACE, data: c.interface.encodeFunctionData('finishRace', [id]), gasLimit: 4000000, gasPrice: GAS, chainId: 56 });
+          const tx = await w.sendTransaction({ to: RACE, data: c.interface.encodeFunctionData('finishRace', [id]), gasLimit: 1800000, gasPrice: GAS, chainId: 56 });
           log('场 #' + id + ' 已到点，自动结算出名次 tx ' + tx.hash);
           done.add('f' + id);
           break;
@@ -112,7 +112,7 @@ async function autoSettle() {
     if (st === 2 && !done.has('s' + id)) {
       try {
         if (await bet.settled(id)) { done.add('s' + id); continue; }
-        const tx = await w.sendTransaction({ to: BET, data: bet.interface.encodeFunctionData('settle', [id]), gasLimit: 3000000, gasPrice: GAS, chainId: 56 });
+        const tx = await w.sendTransaction({ to: BET, data: bet.interface.encodeFunctionData('settle', [id]), gasLimit: 1500000, gasPrice: GAS, chainId: 56 });
         log('场 #' + id + ' 已出结果，自动交割下注池 tx ' + tx.hash);
         done.add('s' + id);
       } catch (e) {
