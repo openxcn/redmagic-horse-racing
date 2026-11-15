@@ -51,6 +51,18 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const log = m => console.log(new Date().toISOString() + ' ' + m);
 const done = new Set();
 const GAS = ethers.parseUnits('0.1', 'gwei'); // BSC 可打包的最低档，0.06 容易被节点判低价拒收
+// 钱包 BNB 是开赛/结算的唯一油钱来源：低于这个值先告警，避免交易被节点以 insufficient funds 拒掉还不知道
+const MIN_BAL = ethers.parseEther('0.002');
+async function ensureGas(tag) {
+  const bal = await w.getBalance().catch(() => null);
+  if (bal == null) return true;
+  if (bal < MIN_BAL) {
+    log('⚠ 警告（' + tag + '）：keeper 钱包 BNB 不足，当前 ' + ethers.formatEther(bal) +
+      ' BNB，低于安全线 ' + ethers.formatEther(MIN_BAL) + '。请尽快给 ' + w.address + ' 充值，否则开赛/结算会失败，比赛会一直卡在「报名中」。');
+    return false;
+  }
+  return true;
+}
 
 /* 满员自动开赛：报满 12 匹且下注窗口结束后立即 timeStart */
 async function autoStart() {
@@ -74,13 +86,19 @@ async function autoStart() {
     if (fullAt === 0n) continue;
     if (now < closeAt + grace) continue; // 下注窗口还没结束，继续等
     if (fund < (Number(r.currency) === 1 ? mgU : mg)) { log('场 #' + id + ' 满员但保证金不足，跳过'); done.add('o' + id); continue; }
+    if (!(await ensureGas('场 #' + id + ' 开赛'))) continue;
     for (let a = 1; a <= 3; a++) {
       try {
         const tx = await w.sendTransaction({ to: RACE, data: c.interface.encodeFunctionData('timeStart', [id]), gasLimit: 4000000, gasPrice: GAS, chainId: 56 });
         log('场 #' + id + ' 下注窗口结束，已开赛 tx ' + tx.hash);
         done.add('o' + id);
         break;
-      } catch (e) { log('场 #' + id + ' 开赛失败(' + a + ')：' + String(e.shortMessage || e.message).slice(0, 120)); await sleep(3000); }
+      } catch (e) {
+        const m = String(e.shortMessage || e.message).slice(0, 120);
+        log('场 #' + id + ' 开赛失败(' + a + ')：' + m);
+        if (/insufficient funds/i.test(m)) log('⚠ 警告：keeper 钱包 BNB 不足以支付开赛矿工费，请给 ' + w.address + ' 充值，否则本场无法开赛');
+        await sleep(3000);
+      }
     }
   }
 }
@@ -88,6 +106,7 @@ async function autoStart() {
 /* 到点自动结算：开赛满 10 分钟（endAt）立即结算名次，紧接着交割下注池。
    两步都是公开函数，keeper 只是当第一个动手的人，保证不用等社长/玩家。 */
 async function autoSettle() {
+  if (!(await ensureGas('自动结算'))) return;
   const count = Number(await c.raceCount());
   const now = BigInt((await p.getBlock('latest')).timestamp);
   const ids = [];
@@ -161,6 +180,7 @@ async function tick() {
 }
 
 log('keeper 启动（满员自动开赛 + 开赛满 10 分钟自动结算，60 秒巡查一次），地址 ' + w.address + '，运行 ' + RUN_MIN + ' 分钟');
+await ensureGas('启动');
 const end = Date.now() + RUN_MIN * 60000;
 while (Date.now() < end) {
   try { await tick(); } catch (e) { log('轮询异常：' + String(e.shortMessage || e.message).slice(0, 120)); }
