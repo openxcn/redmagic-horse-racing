@@ -54,7 +54,7 @@ const GAS = ethers.parseUnits('0.1', 'gwei'); // BSC 可打包的最低档，0.0
 // 钱包 BNB 是开赛/结算的唯一油钱来源：低于这个值先告警，避免交易被节点以 insufficient funds 拒掉还不知道
 const MIN_BAL = ethers.parseEther('0.002');
 async function ensureGas(tag) {
-  const bal = await w.getBalance().catch(() => null);
+  const bal = await p.getBalance(w.address).catch(() => null);
   if (bal == null) return true;
   if (bal < MIN_BAL) {
     log('⚠ 警告（' + tag + '）：keeper 钱包 BNB 不足，当前 ' + ethers.formatEther(bal) +
