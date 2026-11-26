@@ -3,8 +3,8 @@
 // 环境变量：KEEPER_PK（必填，仅含 BNB 的 keeper 钱包私钥）、RPC_URL（可选）
 import { ethers } from 'ethers';
 
-const RACE = '0x8F5a241BaD21e63d4a4553BA675CdE76363b5149';
-const BET = '0x50358dF97F8129E4C3583149d634312c427A75ED';
+const RACE = '0x38892c6C16723A5cbEE4E7DA5c62c501FdD77EC2';
+const BET = '0xC2FF604ad289Eb37fA607028e3f166b2e0F90a90';
 const RPC = process.env.RPC_URL || 'https://bsc-dataseed.bnbchain.org';
 const PK = process.env.KEEPER_PK;
 const POLL = 60000;       // 巡查间隔：开赛与结算都走这个频率，到点最多晚 1 分钟动手
@@ -33,7 +33,7 @@ const BET_ABI = [
 ];
 
 // 结算矿工费托管合约：社长建场时预存，结算完成后由 keeper 催付领回
-const ESCROW = '0xEDFDa39689c48EFaDA39B832f76eb3319c8082de';
+const ESCROW = '0x6DD4DB4D5d2dDD655cC7FBec7F364C9520a65a10';
 const ESCROW_ABI = [
   'function claim(uint256)',
   'function claimable(uint256) view returns(bool)',
